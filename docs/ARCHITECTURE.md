@@ -1,30 +1,49 @@
 # Architecture
 
-## Purpose
+`agentexecsandbox` implements bounded execution around `os/exec.CommandContext`.
 
-`github.com/Trysac/u126-agent-exec-sandbox` is a small, dependency-free Go library: Bounded command executor for agents in Go: allow-listed absolute executables, env allow-list, timeout, output caps and a concurrency limit, stdlib only
+## Component Diagram
 
-## Shape
-
-```text
-caller code --> package agentexecsandbox (repository root)
-                    |
-                    +-- pure functions, no I/O, no global mutable state
-                    +-- internal/ (optional private helpers)
+```
+                  +-------------------------------------+
+                  |           Caller / Agent            |
+                  +-------------------------------------+
+                                     |
+                                     | Run(ctx, Request)
+                                     v
+                       +---------------------------+
+                       |  1. Request Validation    |
+                       |     (limits & sizes)      |
+                       +---------------------------+
+                                     |
+                                     v
+                       +---------------------------+
+                       |  2. Path Allow-list Check |
+                       +---------------------------+
+                                     |
+                                     v
+                       +---------------------------+
+                       |  3. Env Allow-list Check  |
+                       +---------------------------+
+                                     |
+                                     v
+                       +---------------------------+
+                       |  4. Concurrency Slot      |
+                       |     (Buffered Channel)    |
+                       +---------------------------+
+                                     |
+                                     v
+                       +---------------------------+
+                       |  5. Process Execution     |
+                       |  - Setpgid / Process Group|
+                       |  - Capped Output Writers  |
+                       |  - WaitDelay fallback     |
+                       +---------------------------+
 ```
 
-- **Public API**: every exported identifier of the root package. Unexported identifiers and
-  `internal/` packages may change without a major version.
-- **Errors**: invalid input returns an error; exported sentinel errors (such as `ErrBlank`) let
-  callers branch with `errors.Is`. The library never panics on input, prints or exits.
-- **Side effects**: none. If a feature needs I/O, accept an interface (`io.Reader` or a small
-  custom one) instead of opening resources, and record the choice in an ADR.
+## Key Guarantees
 
-## Quality contract
-
-`scripts/check` is the single definition of the gates; `fabrica.json` tells the factory and CI
-how to run it. See [TESTING.md](TESTING.md).
-
-## Decisions
-
-Architecture decisions are recorded in [decisions/](decisions/) as numbered ADRs.
+1. **Environment Isolation**: `cmd.Env` is constructed exclusively from key-values in `Request.Env` that match `Policy.AllowedEnv` (plus `SYSTEMROOT` on Windows). `os.Environ()` is never inherited.
+2. **Memory Safety**: `cappedWriter` buffers up to `MaxOutputBytes` in memory and discards additional stream bytes while setting the `Truncated` flag.
+3. **Non-blocking Throttle**: When `MaxConcurrent` commands are in flight, subsequent runs return `Error{Code: "busy"}` immediately instead of queuing.
+4. **Process Tree Cleanup**: On Unix platforms, processes are placed in their own process group (`Setpgid = true`) and killed via `syscall.Kill(-pid, SIGKILL)` upon timeout or cancellation.

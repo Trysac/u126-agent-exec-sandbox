@@ -1,25 +1,15 @@
-# Testing
+# Testing Strategy
 
-## Running
+The project uses the standard Go helper-process pattern (`TestHelperProcess`) to simulate subprocess behavior without external binaries.
 
-```sh
-go test -cover .          # tests with coverage summary
-go run ./scripts/check    # every gate, as CI and the factory run it
-```
+## Coverage Areas
 
-## Policy
-
-- Statement coverage of the library (every package except `scripts/`) must stay at or above 80 %;
-  the gate fails below it.
-- Tests live in package `agentexecsandbox_test` and exercise the public API only. They assert every
-  observable effect: return values, returned errors (`errors.Is`) and their messages.
-- Prefer table-driven tests with `t.Run` subtests; document usage with runnable `Example`
-  functions, which `go test` verifies through their `// Output:` comments.
-- The race detector runs whenever cgo and a C compiler are available (always in Linux CI); the
-  gate prints why when it has to run without it.
-- Each bug fix starts with a failing test that reproduces it.
-- Tests are deterministic: no network, no wall clock, no dependence on test order.
-
-## Layout
-
-`<file>_test.go` sits next to the file it tests. Fixtures and golden files go in `testdata/`.
+- **Policy Validation**: Rejects invalid configs (negative limits, relative paths).
+- **Allow-list Enforcement**: Positive and negative path testing, ensuring rejection events are emitted.
+- **Output Capping**: Verifies truncation of streams beyond `MaxOutputBytes`.
+- **Timeouts**: Confirms `TimedOut = true` and process cleanup when duration exceeds threshold (tested with 20ms).
+- **Environment Scrubbing**: Confirms parent env is ignored and child env is filtered.
+- **Exit Codes**: Verifies accurate capture of process exit status.
+- **Concurrency Throttling**: Tests non-blocking `busy` errors when `MaxConcurrent` is exceeded.
+- **Request Limits**: Enforces exact boundary limits (256 args, 1 MiB stdin).
+- **Event Integrity**: Ensures sensitive data (sentinels) is redacted from event fields.
