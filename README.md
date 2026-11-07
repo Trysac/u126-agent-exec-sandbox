@@ -1,55 +1,56 @@
 # agent-exec-sandbox
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/Trysac/u126-agent-exec-sandbox.svg)](https://pkg.go.dev/github.com/Trysac/u126-agent-exec-sandbox)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![CI](https://github.com/Trysac/u126-agent-exec-sandbox/actions/workflows/ci.yml/badge.svg)](https://github.com/Trysac/u126-agent-exec-sandbox/actions/workflows/ci.yml)
+Bounded command execution sandbox for autonomous agents in Go.
 
-Bounded command executor for agents in Go: allow-listed absolute executables, env allow-list, timeout, output caps and a concurrency limit, stdlib only
+## The Problem
 
-## Problem
+Agents that run shell tools need every command bounded: a hung process blocks the loop, a chatty one fills memory, and an inherited environment leaks API keys into the child. Ad hoc `exec.Command` calls rarely combine timeouts, output caps, and environment scrubbing correctly. This Go package runs one argv under an explicit policy and returns a typed result, without claiming an isolation it cannot provide.
 
-Describe in two or three sentences the concrete problem this utility solves, who hits it, and what
-they do today without it. Replace this paragraph when the first real feature lands.
+## Installation
 
-## Install
-
-```sh
+```bash
 go get github.com/Trysac/u126-agent-exec-sandbox
 ```
-
-Requires Go 1.23 or newer. No dependencies outside the standard library.
 
 ## Usage
 
 ```go
-package main
-
-import (
-	"errors"
-	"fmt"
-
-	"github.com/Trysac/u126-agent-exec-sandbox"
-)
-
-func main() {
-	// Normalize trims surrounding whitespace and lower-cases the text.
-	out, _ := agentexecsandbox.Normalize("  Hello World ")
-	fmt.Println(out) // -> "hello world"
-
-	// Blank input is rejected explicitly instead of returning an empty string.
-	if _, err := agentexecsandbox.Normalize("   "); errors.Is(err, agentexecsandbox.ErrBlank) {
-		fmt.Println("rejected:", err)
-	}
+ex, err := agentexecsandbox.New(agentexecsandbox.Policy{
+	AllowedExecutables: []string{"/bin/echo"},
+	AllowedEnv:         []string{"QUERY"},
+	Timeout:            5 * time.Second,
+})
+if err != nil { panic(err) }
+res, err := ex.Run(context.Background(), agentexecsandbox.Request{
+	Path: "/bin/echo",
+	Args: []string{"hello"},
+})
+if err == nil {
+	fmt.Println(string(res.Stdout))
 }
 ```
 
-## Documentation
+## Public API Summary
 
-- [Architecture](docs/ARCHITECTURE.md) and [decisions](docs/decisions/)
-- [Testing](docs/TESTING.md) and [security](docs/SECURITY.md)
-- [Project record](docs/PROJECT.md) and [stack](docs/STACK.md)
-- [Changelog](CHANGELOG.md) and [contributing guide](CONTRIBUTING.md)
+### Types
+- `Policy`: Defines constraints. `AllowedExecutables` (absolute, cleaned paths); `AllowedEnv` (keys to pass from request); `WorkDir` (absolute path, defaults to `os.TempDir()`); `Timeout` (defaults to 30s); `MaxOutputBytes` (per stream, default 1 MiB); `MaxConcurrent` (default 4); `OnEvent` (optional callback).
+- `Request`: `Path` (string), `Args` ([]string), `Env` (map[string]string), `Stdin` ([]byte).
+- `Result`: `ExitCode` (int), `Stdout`/`Stderr` ([]byte), `StdoutTruncated`/`StderrTruncated` (bool), `TimedOut` (bool), `Duration` (time.Duration).
+- `Event`: `Kind` ("denied", "started", "finished"), `Path` (string), `ExitCode` (int), `TimedOut` (bool), `Code` (string).
 
-## License
+### Errors
+All errors are `*agentexecsandbox.Error` with stable codes:
+- `invalid_policy`: Configuration parameters violate bounds.
+- `not_allowed`: Executable not absolute or not in allow-list.
+- `env_not_allowed`: Environment variable requested not in `AllowedEnv`.
+- `invalid_request`: Exceeds arg/stdin limits (256 args, 64 KiB total arg length, 1 MiB stdin).
+- `busy`: Concurrency limit reached.
+- `start_failed`: Executable failed to spawn.
 
-[MIT](LICENSE) (c) 2026 Miguel Gomez
+## Why not plain os/exec?
+
+`os/exec` requires manual implementation of process group termination, environment stripping, and output buffering. `agent-exec-sandbox` provides a single, audited Go call that applies every bound consistently, ensuring no accidental inheritance or resource leaks.
+
+## Security
+
+See [docs/SECURITY.md](docs/SECURITY.md) for the threat model.

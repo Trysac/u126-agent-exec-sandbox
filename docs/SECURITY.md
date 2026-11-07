@@ -1,20 +1,19 @@
-# Security notes
+# Security Model and Threat Assessment
 
-## Threat model
+`agentexecsandbox` constrains host interactions when agents invoke external executables.
 
-`github.com/Trysac/u126-agent-exec-sandbox` is a pure library without I/O. The main risks are:
+## Threats Defended
 
-- **Supply chain**: a compromised dependency or CI action. Mitigation: standard library only,
-  `go.sum` verification, `govulncheck` in the local gates, Dependabot weekly updates, actions
-  pinned by commit SHA, minimal workflow permissions.
-- **Leaked secrets**: tokens committed by mistake. Mitigation: `gitleaks` runs in the local gates
-  and in CI; `.env` files are git-ignored.
-- **Untrusted input**: callers may pass hostile strings. Mitigation: validate input and return
-  explicit errors; never use `unsafe` or `os/exec` with untrusted data.
+- **Unlisted Executables**: Paths must be absolute and strictly match `AllowedExecutables`.
+- **Relative Path Escapes**: Rejected via `filepath.Clean` and absolute path verification.
+- **Environment Secret Leaks**: Parent environment is NEVER inherited. Only explicitly allowed `Request.Env` keys are passed.
+- **Runaway Processes**: Enforced via `Policy.Timeout` with forced `SIGKILL` to process groups (Unix).
+- **Output Bloat**: Stdout/Stderr capped at `MaxOutputBytes` with truncation flagging.
+- **Concurrency DoS**: Non-blocking `busy` errors prevent agent overloading.
+- **Info Leakage**: Errors and events omit arguments, environment values, and stdin.
 
-## Publishing
+## Threats NOT Defended
 
-Releases are git tags served through the Go module proxy and checksum database. No registry token
-is stored in the repository.
-
-To report a vulnerability, see [SECURITY.md](../SECURITY.md).
+- **Allowed Program Abuse**: If `python` or `sh` is allowed, the agent can perform any action the host user can, including network calls and filesystem access.
+- **OS Limits**: Memory (RSS), CPU usage, and file descriptor counts are not constrained.
+- **TOCTOU**: Symlink swaps between check-time and exec-time are not prevented.

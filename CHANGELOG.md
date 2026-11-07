@@ -9,4 +9,5 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Add bounded agent command execution sandbox with executable allow-lists, output capping, clean environments, and concurrency throttling.
 - Initial project structure from the factory utility template.
